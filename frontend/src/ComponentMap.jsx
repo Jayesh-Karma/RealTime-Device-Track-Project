@@ -2,34 +2,79 @@ import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useGeolocated } from 'react-geolocated';
+import io from 'socket.io-client';
+
+const socket = io('http://localhost:4000/');
 
 const ComponentMap = () => {
-  const [location, setLocation] = useState([20.5937, 78.9629]); // Default to India coordinates
+  const [location, setLocation] = useState();
   const [permission, setPermission] = useState(false);
+  const [userLocations, setUserLocations] = useState([]);
 
-  const { coords, isGeolocationAvailable, isGeolocationEnabled, getCurrentPosition } = useGeolocated({
+  const { coords, isGeolocationAvailable, isGeolocationEnabled } = useGeolocated({
     positionOptions: {
       enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 5000,
     },
-    userDecisionTimeout: 5000,
+    userDecisionTimeout: null,
+    geolocationProvider: navigator.geolocation,
+    isOptimisticGeolocationEnabled: true,
+    watchLocationPermissionChange: false,
   });
 
-  // Use useEffect to handle location updates
   useEffect(() => {
-    if (coords) {
-      setLocation([coords.latitude, coords.longitude]);
-      setPermission(true);
-    }
-  }, [coords]);
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setLocation([latitude, longitude]);
+        setPermission(true);
+        socket.emit('send-location', {
+          latitude,
+          longitude,
+        });
+      },
+      (error) => {
+        console.error(error);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 5000,
+      }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, []);
+
+  useEffect(() => {
+    socket.on('receive-location', (data) => {
+      setUserLocations((prevLocations) => {
+        const updatedLocations = prevLocations.filter((loc) => loc.id !== data.id);
+        updatedLocations.push(data);
+        return updatedLocations;
+      });
+    });
+
+    socket.on('user-disconnected', (data) => {
+      setUserLocations((prevLocations) => prevLocations.filter((loc) => loc.id !== data.id));
+    });
+
+    return () => {
+      socket.off('receive-location');
+      socket.off('user-disconnected');
+    };
+  }, []);
 
   if (!isGeolocationAvailable) {
     return <div>Geolocation is not available in your browser.</div>;
   }
 
   if (!isGeolocationEnabled) {
-    return <div>Geolocation is not enabled. Please enable it in your browser settings.</div>;
+    return <div>Geolocation is not enabled.</div>;
   }
-  console.log(location)
 
   return (
     <div className='mapContain'>
@@ -37,11 +82,12 @@ const ComponentMap = () => {
         <MapContainer
           center={location}
           zoom={13}
-          scrollWheelZoom={false}
-          style={{ height: "80vh", width: "100%" }}
+          maxZoom={20}
+          scrollWheelZoom={true}
+          style={{ height: '80vh', width: '80%' }}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            attribution='Device Tracker Dummy'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <Marker position={location}>
@@ -49,12 +95,19 @@ const ComponentMap = () => {
               You are here. <br /> Easily customizable.
             </Popup>
           </Marker>
+          {userLocations.map((userLocation) => (
+            <Marker key={userLocation.id} position={[userLocation.latitude, userLocation.longitude]}>
+              <Popup>
+                User {userLocation.id.substring(0,2)} is here.
+              </Popup>
+            </Marker>
+          ))}
         </MapContainer>
       ) : (
-        <div>Requesting permission or location...</div>
+        <div>Requesting location...</div>
       )}
     </div>
   );
-}
+};
 
 export default ComponentMap;

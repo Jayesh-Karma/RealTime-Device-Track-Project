@@ -1,27 +1,36 @@
-const express = require("express");
+const express = require('express');
+const http = require('http');
+const cors = require('cors');
+const socketIo = require('socket.io');
+
 const app = express();
-const http = require("http");
-const path = require("path")
-
-// setup server and socket io
-const socketIo = require("socket.io");
 const server = http.createServer(app);
-const io = socketIo(server);
+const io = socketIo(server, {
+  cors: {
+    origin: 'http://localhost:5173',
+    methods: ['GET', 'POST'],
+  },
+});
 
-// setup ejs 
+app.use(cors());
 
+io.on('connection', (socket) => {
+  console.log('A user connected:', socket.id);
 
-//  establish connection 
-io.on("connection", (socket) =>{
-    socket.on("send-location", (data)=> {
-        io.emit("receive-location", { id:socket.id, ...data})
-    })
-    console.log("connected to socket")
-})
-app.get("/", (req,res) =>{
-    res.render("index")
-})
+  socket.on('send-location', (data) => {
+    io.emit('receive-location', { id: socket.id, ...data });
+  });
 
-server.listen(4000, ()=>{
-    console.log("Server started successfully");
-})
+  socket.on('disconnect', () => {
+    io.emit('user-disconnected', { id: socket.id });
+    console.log('A user disconnected:', socket.id);
+  });
+});
+
+app.get('/', (req, res) => {
+  res.send('Server running');
+});
+
+server.listen(4000, () => {
+  console.log('Server started successfully on port 4000');
+});
